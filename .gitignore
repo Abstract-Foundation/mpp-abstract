@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+.env
+.env.*
+*.log
+.DS_Store
+packages/contracts/lib/
+packages/contracts/cache/
+packages/contracts/.git/
