@@ -1,11 +1,12 @@
 node_modules/
 dist/
 out/
+zkout/
 .env
 .env.*
 *.log
 .DS_Store
 packages/contracts/lib/
 packages/contracts/cache/
-packages/contracts/.git/
+packages/contracts/dependencies/
 .turbo

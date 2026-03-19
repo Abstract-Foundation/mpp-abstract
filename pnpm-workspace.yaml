@@ -1,3 +1,9 @@
 packages:
   - "packages/*"
   - "examples/*"
+
+catalog:
+  mppx: "^0.4.7"
+  viem: "^2.38.6"
+  typescript: "^5.8.2"
+  tsx: "^4.19.3"

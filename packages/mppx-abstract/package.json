@@ -23,13 +23,13 @@
     "dev": "tsc --watch"
   },
   "peerDependencies": {
-    "mppx": "^0.4.7",
-    "viem": "^2.38.6"
+    "mppx": "catalog:",
+    "viem": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "mppx": "0.4.7",
-    "typescript": "^5.8.2",
-    "viem": "^2.38.6"
+    "mppx": "catalog:",
+    "typescript": "catalog:",
+    "viem": "catalog:"
   }
 }

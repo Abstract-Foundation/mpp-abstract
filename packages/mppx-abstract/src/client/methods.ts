@@ -2,8 +2,8 @@
  * Abstract MPP method definitions (client + server share the same schema objects).
  */
 
-import { z, Method } from 'mppx'
-import { parseUnits } from 'viem'
+import { Method, z } from 'mppx';
+import { parseUnits } from 'viem';
 
 // ── Charge ────────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ export const abstractChargeMethods = Method.from({
       })),
     ) as any,
   },
-})
+});
 
 // ── Session ───────────────────────────────────────────────────────────────
 
@@ -102,23 +102,38 @@ export const abstractSessionMethods = Method.from({
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       z.transform((v: any) => {
-        const { amount, decimals, suggestedDeposit, minVoucherDelta, channelId, escrowContract, chainId, ...rest } = v
+        const {
+          amount,
+          decimals,
+          suggestedDeposit,
+          minVoucherDelta,
+          channelId,
+          escrowContract,
+          chainId,
+          ...rest
+        } = v;
         return {
           ...rest,
           amount: parseUnits(amount as string, decimals as number).toString(),
           ...(suggestedDeposit !== undefined && {
-            suggestedDeposit: parseUnits(suggestedDeposit as string, decimals as number).toString(),
+            suggestedDeposit: parseUnits(
+              suggestedDeposit as string,
+              decimals as number,
+            ).toString(),
           }),
           methodDetails: {
             escrowContract,
             ...(channelId !== undefined && { channelId }),
             ...(minVoucherDelta !== undefined && {
-              minVoucherDelta: parseUnits(minVoucherDelta as string, decimals as number).toString(),
+              minVoucherDelta: parseUnits(
+                minVoucherDelta as string,
+                decimals as number,
+              ).toString(),
             }),
             ...(chainId !== undefined && { chainId }),
           },
-        }
+        };
       }),
     ) as any,
   },
-})
+});
