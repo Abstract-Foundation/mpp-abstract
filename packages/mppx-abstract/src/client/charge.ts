@@ -6,30 +6,28 @@
  * `transferWithAuthorization` call on behalf of the payer.
  */
 
+import { Credential, Method } from 'mppx';
 import {
-  createWalletClient,
-  http,
   type Account,
   type Address,
+  createWalletClient,
   type Hex,
+  http,
+  type Transport,
   type WalletClient,
-} from 'viem'
-import { signTypedData } from 'viem/actions'
-import { Method, Credential } from 'mppx'
-import {
-  ABSTRACT_MAINNET_CHAIN_ID,
-  ABSTRACT_MAINNET_RPC,
-  ABSTRACT_TESTNET_CHAIN_ID,
-  ABSTRACT_TESTNET_RPC,
-  TRANSFER_WITH_AUTHORIZATION_TYPES,
-} from '../constants.js'
-import { abstractChargeMethods } from './methods.js'
+} from 'viem';
+import { abstract, abstractTestnet } from 'viem/chains';
+import type { ChainEIP712 } from 'viem/zksync';
+import { TRANSFER_WITH_AUTHORIZATION_TYPES } from '../constants.js';
+import { abstractChargeMethods } from './methods.js';
 
 export interface AbstractChargeClientOptions {
   /** Viem account to sign ERC-3009 authorizations. */
-  account: Account
+  account: Account;
+  /** Optional custom RPC URL override. */
+  rpcUrl?: string;
   /** Override the viem wallet client factory (advanced). */
-  getClient?: (chainId: number) => WalletClient | Promise<WalletClient>
+  getClient?: (chainId: number) => WalletClient | Promise<WalletClient>;
 }
 
 /**
@@ -45,62 +43,75 @@ export interface AbstractChargeClientOptions {
  * ```
  */
 export function abstractCharge(options: AbstractChargeClientOptions) {
-  const { account, getClient: customGetClient } = options
+  const { account, getClient: customGetClient, rpcUrl } = options;
 
-  function buildClient(chainId: number): WalletClient {
-    const isTestnet = chainId === ABSTRACT_TESTNET_CHAIN_ID
-    const rpc = isTestnet ? ABSTRACT_TESTNET_RPC : ABSTRACT_MAINNET_RPC
-    const chain = {
-      id: chainId,
-      name: isTestnet ? 'Abstract Testnet' : 'Abstract',
-      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-      rpcUrls: { default: { http: [rpc] } },
-    } as const
+  function buildClient(
+    chainId: number,
+  ): WalletClient<Transport, ChainEIP712, Account> {
+    const chain: ChainEIP712 | undefined =
+      chainId === abstract.id
+        ? abstract
+        : chainId === abstractTestnet.id
+          ? abstractTestnet
+          : undefined;
 
-    return createWalletClient({ account, chain, transport: http(rpc) })
+    if (!chain) {
+      throw new Error(
+        `Unsupported chainId ${chainId} for Abstract charge method`,
+      );
+    }
+
+    return createWalletClient({ account, chain, transport: http(rpcUrl) });
   }
 
   async function resolveClient(chainId: number): Promise<WalletClient> {
-    if (customGetClient) return customGetClient(chainId)
-    return buildClient(chainId)
+    if (customGetClient) return customGetClient(chainId);
+    return buildClient(chainId);
   }
 
   return Method.toClient(abstractChargeMethods, {
-    async createCredential({ challenge }: { challenge: Record<string, unknown> }) {
-      const methodDetails = (challenge.request as Record<string, unknown>).methodDetails as
-        | Record<string, unknown>
-        | undefined
+    async createCredential({
+      challenge,
+    }: {
+      challenge: Record<string, unknown>;
+    }) {
+      const methodDetails = (challenge.request as Record<string, unknown>)
+        .methodDetails as Record<string, unknown> | undefined;
       const chainId =
         (methodDetails?.chainId as number | undefined) ??
-        ((challenge.request as Record<string, unknown>).chainId as number | undefined) ??
-        ABSTRACT_MAINNET_CHAIN_ID
+        ((challenge.request as Record<string, unknown>).chainId as
+          | number
+          | undefined) ??
+        abstract.id;
 
-      const client = await resolveClient(chainId)
+      const client = await resolveClient(chainId);
 
-      const req = challenge.request as Record<string, unknown>
-      const currency = req.currency as Address
-      const recipient = req.recipient as Address
-      const amountRaw = req.amount as string
+      const req = challenge.request as Record<string, unknown>;
+      const currency = req.currency as Address;
+      const recipient = req.recipient as Address;
+      const amountRaw = req.amount as string;
 
       // Random bytes32 nonce for the ERC-3009 authorization
-      const nonceBytes = new Uint8Array(32)
-      globalThis.crypto.getRandomValues(nonceBytes)
-      const nonce = `0x${Array.from(nonceBytes).map(b => b.toString(16).padStart(2, '0')).join('')}` as Hex
+      const nonceBytes = new Uint8Array(32);
+      globalThis.crypto.getRandomValues(nonceBytes);
+      const nonce = `0x${Array.from(nonceBytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')}` as Hex;
 
-      const validAfter = 0n
-      const expiresStr = challenge.expires as string | undefined
+      const validAfter = 0n;
+      const expiresStr = challenge.expires as string | undefined;
       const validBefore = expiresStr
         ? BigInt(Math.floor(new Date(expiresStr).getTime() / 1000))
-        : BigInt(Math.floor(Date.now() / 1000) + 1800)
+        : BigInt(Math.floor(Date.now() / 1000) + 1800);
 
       const domain = {
         name: 'USD Coin',
         version: '2',
         chainId,
         verifyingContract: currency,
-      }
+      };
 
-      const signature = await signTypedData(client, {
+      const signature = await client.signTypedData({
         account,
         domain,
         types: TRANSFER_WITH_AUTHORIZATION_TYPES,
@@ -113,12 +124,14 @@ export function abstractCharge(options: AbstractChargeClientOptions) {
           validBefore,
           nonce,
         },
-      })
+      });
 
-      const source = `did:pkh:eip155:${chainId}:${account.address}`
+      const source = `did:pkh:eip155:${chainId}:${account.address}`;
 
       return Credential.serialize({
-        challenge: challenge as Parameters<typeof Credential.serialize>[0]['challenge'],
+        challenge: challenge as Parameters<
+          typeof Credential.serialize
+        >[0]['challenge'],
         source,
         payload: {
           type: 'authorization' as const,
@@ -128,7 +141,7 @@ export function abstractCharge(options: AbstractChargeClientOptions) {
           validBefore: validBefore.toString(),
           from: account.address as Address,
         },
-      })
+      });
     },
-  })
+  });
 }
