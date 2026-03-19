@@ -1,18 +1,7 @@
+import { abstract, abstractTestnet } from 'viem/chains'
 /**
  * Abstract chain constants for the MPP plugin.
  */
-
-// ── Chain IDs ──────────────────────────────────────────────────────────────
-
-export const ABSTRACT_TESTNET_CHAIN_ID = 11124
-export const ABSTRACT_MAINNET_CHAIN_ID = 2741
-
-// ── RPC URLs ───────────────────────────────────────────────────────────────
-
-export const ABSTRACT_TESTNET_RPC = 'https://api.testnet.abs.xyz'
-export const ABSTRACT_MAINNET_RPC = 'https://api.mainnet.abs.xyz'
-
-// ── USDC.e token addresses ─────────────────────────────────────────────────
 
 /** USDC.e on Abstract Testnet (ERC-3009, 6 decimals) */
 export const USDC_E_TESTNET = '0xbd28Bd5A3Ef540d1582828CE2A1a657353008C61' as const
@@ -283,6 +272,6 @@ export const TRANSFER_WITH_AUTHORIZATION_TYPES = {
 // ── Default currency map by chainId ───────────────────────────────────────
 
 export const DEFAULT_CURRENCY: Record<number, `0x${string}`> = {
-  [ABSTRACT_TESTNET_CHAIN_ID]: USDC_E_TESTNET,
+  [abstractTestnet]: USDC_E_TESTNET,
   [ABSTRACT_MAINNET_CHAIN_ID]: USDC_E_MAINNET,
 }
