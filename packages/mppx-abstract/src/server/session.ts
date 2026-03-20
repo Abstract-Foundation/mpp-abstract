@@ -18,9 +18,14 @@ import {
   recoverTypedDataAddress,
   type Transport,
   type WalletClient,
+  zeroAddress,
 } from 'viem';
 import { abstract, abstractTestnet } from 'viem/chains';
-import { type ChainEIP712, getGeneralPaymasterInput } from 'viem/zksync';
+import {
+  type ChainEIP712,
+  eip712WalletActions,
+  getGeneralPaymasterInput,
+} from 'viem/zksync';
 import { abstractSessionMethods } from '../client/methods.js';
 import {
   ABSTRACT_STREAM_CHANNEL_ABI,
@@ -30,6 +35,7 @@ import {
   VOUCHER_DOMAIN_VERSION,
   VOUCHER_TYPES,
 } from '../constants.js';
+import { assertUint128, resolveChain } from '../internal.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -140,6 +146,7 @@ function makeSessionReceipt(params: {
 }) {
   return {
     method: 'abstract' as const,
+    intent: 'session' as const,
     status: 'success' as const,
     timestamp: new Date().toISOString(),
     reference: params.txHash ?? params.channelId,
@@ -202,23 +209,14 @@ export function session(params: AbstractSessionServerOptions) {
     publicClient: PublicClient<Transport, ChainEIP712>;
     walletClient: WalletClient<Transport, ChainEIP712, Account>;
   } {
-    const chain: ChainEIP712 | undefined =
-      chainId === abstract.id
-        ? abstract
-        : chainId === abstractTestnet.id
-          ? abstractTestnet
-          : undefined;
-    if (!chain) {
-      throw new SessionError(
-        `Unsupported chainId: ${chainId}`,
-        'UNSUPPORTED_CHAIN',
-      );
-    }
+    const chain = resolveChain(chainId);
     const transport = http(rpcUrl);
 
     return {
       publicClient: createPublicClient({ chain, transport }),
-      walletClient: createWalletClient({ account, chain, transport }),
+      walletClient: createWalletClient({ account, chain, transport }).extend(
+        eip712WalletActions(),
+      ),
     };
   }
 
@@ -245,20 +243,11 @@ export function session(params: AbstractSessionServerOptions) {
       escrowContract,
     } as Record<string, unknown>,
 
-    async request({
-      credential,
-      request,
-    }: {
-      credential?: unknown;
-      request: Record<string, unknown>;
-    }) {
-      const md = (request.methodDetails ?? {}) as Record<string, unknown>;
-      const chainId = (md.chainId as number | undefined) ?? defaultChain.id;
+    async request({ request }) {
       return {
         ...request,
-        chainId,
-        escrowContract:
-          (md.escrowContract as Address | undefined) ?? escrowContract,
+        chainId: request.chainId ?? defaultChain.id,
+        escrowContract: request.escrowContract ?? escrowContract,
       };
     },
 
@@ -306,6 +295,11 @@ export function session(params: AbstractSessionServerOptions) {
             );
           if (onChain.finalized)
             throw new SessionError('Channel is finalized', 'CHANNEL_FINALIZED');
+          if (onChain.closeRequestedAt !== 0n)
+            throw new SessionError(
+              'Channel has a pending close request',
+              'CLOSE_REQUESTED',
+            );
           if (!isAddressEqual(onChain.payee, recipient)) {
             throw new SessionError('On-chain payee mismatch', 'PAYEE_MISMATCH');
           }
@@ -313,14 +307,14 @@ export function session(params: AbstractSessionServerOptions) {
             throw new SessionError('On-chain token mismatch', 'TOKEN_MISMATCH');
           }
 
-          const ZERO_ADDR =
-            '0x0000000000000000000000000000000000000000' as Address;
           const authorizedSigner = isAddressEqual(
             onChain.authorizedSigner,
-            ZERO_ADDR,
+            zeroAddress,
           )
             ? onChain.payer
             : onChain.authorizedSigner;
+
+          assertUint128(cumulativeAmount);
 
           if (cumulativeAmount > onChain.deposit) {
             throw new SessionError(
@@ -437,6 +431,8 @@ export function session(params: AbstractSessionServerOptions) {
             });
           }
 
+          assertUint128(cumulativeAmount);
+
           const delta = cumulativeAmount - state.highestVoucherAmount;
           if (delta < minDelta) {
             throw new SessionError(
@@ -497,6 +493,8 @@ export function session(params: AbstractSessionServerOptions) {
               'Channel already finalized',
               'CHANNEL_FINALIZED',
             );
+
+          assertUint128(cumulativeAmount);
 
           const minClose =
             state.spent > state.settledOnChain

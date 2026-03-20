@@ -18,6 +18,9 @@ catalogs:
     viem:
       specifier: ^2.38.6
       version: 2.47.5
+    zod:
+      specifier: ^4.3.6
+      version: 4.3.6
 
 importers:
 
@@ -93,6 +96,9 @@ importers:
       viem:
         specifier: 'catalog:'
         version: 2.47.5(typescript@5.9.3)(zod@4.3.6)
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
 
 packages:
 
