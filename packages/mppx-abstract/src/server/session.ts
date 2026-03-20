@@ -4,7 +4,7 @@
  * Handles the full channel lifecycle against AbstractStreamChannel.sol.
  */
 
-import { Method } from 'mppx';
+import { Errors, Method, Store } from 'mppx';
 import {
   type Account,
   type Address,
@@ -39,6 +39,12 @@ import { assertUint128, resolveChain } from '../internal.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
+interface VoucherRecord {
+  channelId: Hex;
+  cumulativeAmount: bigint;
+  signature: Hex;
+}
+
 interface ChannelState {
   channelId: Hex;
   chainId: number;
@@ -57,22 +63,53 @@ interface ChannelState {
   createdAt: string;
 }
 
-interface VoucherRecord {
-  channelId: Hex;
-  cumulativeAmount: bigint;
-  signature: Hex;
+// ── ChannelStore ──────────────────────────────────────────────────────────
+
+interface ChannelStore {
+  getChannel(channelId: Hex): Promise<ChannelState | null>;
+  updateChannel(
+    channelId: Hex,
+    fn: (current: ChannelState | null) => ChannelState | null,
+  ): Promise<ChannelState | null>;
 }
 
-// ── Errors ─────────────────────────────────────────────────────────────────
+function channelStoreFromStore(store: Store.Store): ChannelStore {
+  const locks = new Map<string, Promise<void>>();
 
-class SessionError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-  ) {
-    super(message);
-    this.name = 'SessionError';
+  async function update(
+    channelId: Hex,
+    fn: (current: ChannelState | null) => ChannelState | null,
+  ): Promise<ChannelState | null> {
+    while (locks.has(channelId)) await locks.get(channelId);
+
+    let release!: () => void;
+    locks.set(
+      channelId,
+      new Promise<void>((r) => {
+        release = r;
+      }),
+    );
+
+    try {
+      const current = await store.get<ChannelState | null>(channelId);
+      const next = fn(current);
+      if (next) await store.put(channelId, next);
+      else await store.delete(channelId);
+      return next;
+    } finally {
+      locks.delete(channelId);
+      release();
+    }
   }
+
+  return {
+    async getChannel(channelId) {
+      return store.get<ChannelState | null>(channelId);
+    },
+    async updateChannel(channelId, fn) {
+      return update(channelId, fn);
+    },
+  };
 }
 
 // ── Options ────────────────────────────────────────────────────────────────
@@ -104,6 +141,8 @@ export interface AbstractSessionServerOptions {
   paymasterAddress?: Address;
   /** Optional custom input for the paymaster's logic. */
   paymasterInput?: Hex;
+  /** Store backend for channel state. Defaults to Store.memory(). */
+  store?: Store.Store;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -201,9 +240,9 @@ export function session(params: AbstractSessionServerOptions) {
   const defaultChain = testnet ? abstractTestnet : abstract;
   const currency = params.currency ?? DEFAULT_CURRENCY[defaultChain.id];
   const minDelta = parseUnits(minVoucherDelta, decimals);
-
-  // In-memory channel store
-  const channels = new Map<Hex, ChannelState>();
+  const channelStore = channelStoreFromStore(
+    params.store ?? Store.memory(),
+  );
 
   function buildClients(chainId: number): {
     publicClient: PublicClient<Transport, ChainEIP712>;
@@ -281,30 +320,33 @@ export function session(params: AbstractSessionServerOptions) {
             hash: txHash,
           });
           if (receipt.status !== 'success') {
-            throw new SessionError(
-              `Open tx reverted: ${txHash}`,
-              'OPEN_REVERTED',
-            );
+            throw new Errors.VerificationFailedError({
+              reason: `open transaction reverted: ${txHash}`,
+            });
           }
 
           const onChain = await getOnChainChannel(publicClient, channelId);
           if (onChain.deposit === 0n)
-            throw new SessionError(
-              'Channel not funded on-chain',
-              'CHANNEL_NOT_FOUND',
-            );
+            throw new Errors.ChannelNotFoundError({
+              reason: 'channel not funded on-chain',
+            });
           if (onChain.finalized)
-            throw new SessionError('Channel is finalized', 'CHANNEL_FINALIZED');
+            throw new Errors.ChannelClosedError({
+              reason: 'channel is finalized',
+            });
           if (onChain.closeRequestedAt !== 0n)
-            throw new SessionError(
-              'Channel has a pending close request',
-              'CLOSE_REQUESTED',
-            );
+            throw new Errors.ChannelClosedError({
+              reason: 'channel has a pending close request',
+            });
           if (!isAddressEqual(onChain.payee, recipient)) {
-            throw new SessionError('On-chain payee mismatch', 'PAYEE_MISMATCH');
+            throw new Errors.VerificationFailedError({
+              reason: 'on-chain payee mismatch',
+            });
           }
           if (!isAddressEqual(onChain.token, currency)) {
-            throw new SessionError('On-chain token mismatch', 'TOKEN_MISMATCH');
+            throw new Errors.VerificationFailedError({
+              reason: 'on-chain token mismatch',
+            });
           }
 
           const authorizedSigner = isAddressEqual(
@@ -317,10 +359,9 @@ export function session(params: AbstractSessionServerOptions) {
           assertUint128(cumulativeAmount);
 
           if (cumulativeAmount > onChain.deposit) {
-            throw new SessionError(
-              'Voucher exceeds deposit',
-              'AMOUNT_EXCEEDS_DEPOSIT',
-            );
+            throw new Errors.AmountExceedsDepositError({
+              reason: 'voucher exceeds deposit',
+            });
           }
 
           const voucher: VoucherRecord = {
@@ -335,10 +376,9 @@ export function session(params: AbstractSessionServerOptions) {
             authorizedSigner,
           );
           if (!valid)
-            throw new SessionError(
-              'Invalid voucher signature',
-              'INVALID_SIGNATURE',
-            );
+            throw new Errors.InvalidSignatureError({
+              reason: 'invalid voucher signature',
+            });
 
           const state: ChannelState = {
             channelId,
@@ -357,7 +397,7 @@ export function session(params: AbstractSessionServerOptions) {
             finalized: false,
             createdAt: new Date().toISOString(),
           };
-          channels.set(channelId, state);
+          await channelStore.updateChannel(channelId, () => state);
 
           return makeSessionReceipt({
             challengeId: challenge.id as string,
@@ -374,36 +414,42 @@ export function session(params: AbstractSessionServerOptions) {
           const channelId = payload.channelId as Hex;
           const txHash = payload.txHash as Hex;
 
-          const state = channels.get(channelId);
+          const state = await channelStore.getChannel(channelId);
           if (!state)
-            throw new SessionError('Channel not found', 'CHANNEL_NOT_FOUND');
+            throw new Errors.ChannelNotFoundError({
+              reason: 'channel not found',
+            });
 
           const receipt = await publicClient.waitForTransactionReceipt({
             hash: txHash,
           });
           if (receipt.status !== 'success') {
-            throw new SessionError(
-              `TopUp tx reverted: ${txHash}`,
-              'TOPUP_REVERTED',
-            );
+            throw new Errors.VerificationFailedError({
+              reason: `topUp transaction reverted: ${txHash}`,
+            });
           }
 
           const onChain = await getOnChainChannel(publicClient, channelId);
           if (onChain.deposit <= state.deposit) {
-            throw new SessionError(
-              'Deposit did not increase',
-              'DEPOSIT_NOT_INCREASED',
-            );
+            throw new Errors.VerificationFailedError({
+              reason: 'channel deposit did not increase',
+            });
           }
-          state.deposit = onChain.deposit;
-          channels.set(channelId, state);
+
+          const updated = await channelStore.updateChannel(
+            channelId,
+            (current) => {
+              if (!current) return null;
+              return { ...current, deposit: onChain.deposit };
+            },
+          );
 
           return makeSessionReceipt({
             challengeId: challenge.id as string,
             channelId,
-            acceptedCumulative: state.highestVoucherAmount,
-            spent: state.spent,
-            units: state.units,
+            acceptedCumulative: updated?.highestVoucherAmount ?? 0n,
+            spent: updated?.spent ?? 0n,
+            units: updated?.units ?? 0,
             txHash,
           });
         }
@@ -414,13 +460,16 @@ export function session(params: AbstractSessionServerOptions) {
           const cumulativeAmount = BigInt(payload.cumulativeAmount as string);
           const signature = payload.signature as Hex;
 
-          const state = channels.get(channelId);
+          const state = await channelStore.getChannel(channelId);
           if (!state)
-            throw new SessionError('Channel not found', 'CHANNEL_NOT_FOUND');
+            throw new Errors.ChannelNotFoundError({
+              reason: 'channel not found',
+            });
           if (state.finalized)
-            throw new SessionError('Channel is finalized', 'CHANNEL_FINALIZED');
+            throw new Errors.ChannelClosedError({
+              reason: 'channel is finalized',
+            });
 
-          // Idempotent
           if (cumulativeAmount <= state.highestVoucherAmount) {
             return makeSessionReceipt({
               challengeId: challenge.id as string,
@@ -435,16 +484,14 @@ export function session(params: AbstractSessionServerOptions) {
 
           const delta = cumulativeAmount - state.highestVoucherAmount;
           if (delta < minDelta) {
-            throw new SessionError(
-              `Delta ${delta} < min ${minDelta}`,
-              'DELTA_TOO_SMALL',
-            );
+            throw new Errors.DeltaTooSmallError({
+              reason: `delta ${delta} below minimum ${minDelta}`,
+            });
           }
           if (cumulativeAmount > state.deposit) {
-            throw new SessionError(
-              'Voucher exceeds deposit',
-              'AMOUNT_EXCEEDS_DEPOSIT',
-            );
+            throw new Errors.AmountExceedsDepositError({
+              reason: 'voucher exceeds deposit',
+            });
           }
 
           const voucher: VoucherRecord = {
@@ -459,23 +506,30 @@ export function session(params: AbstractSessionServerOptions) {
             state.authorizedSigner,
           );
           if (!valid)
-            throw new SessionError(
-              'Invalid voucher signature',
-              'INVALID_SIGNATURE',
-            );
+            throw new Errors.InvalidSignatureError({
+              reason: 'invalid voucher signature',
+            });
 
-          state.highestVoucherAmount = cumulativeAmount;
-          state.highestVoucher = voucher;
-          state.spent += challengeAmount;
-          state.units += 1;
-          channels.set(channelId, state);
+          const updated = await channelStore.updateChannel(
+            channelId,
+            (current) => {
+              if (!current) return null;
+              return {
+                ...current,
+                highestVoucherAmount: cumulativeAmount,
+                highestVoucher: voucher,
+                spent: current.spent + challengeAmount,
+                units: current.units + 1,
+              };
+            },
+          );
 
           return makeSessionReceipt({
             challengeId: challenge.id as string,
             channelId,
             acceptedCumulative: cumulativeAmount,
-            spent: state.spent,
-            units: state.units,
+            spent: updated?.spent ?? 0n,
+            units: updated?.units ?? 0,
           });
         }
 
@@ -485,14 +539,15 @@ export function session(params: AbstractSessionServerOptions) {
           const cumulativeAmount = BigInt(payload.cumulativeAmount as string);
           const signature = payload.signature as Hex;
 
-          const state = channels.get(channelId);
+          const state = await channelStore.getChannel(channelId);
           if (!state)
-            throw new SessionError('Channel not found', 'CHANNEL_NOT_FOUND');
+            throw new Errors.ChannelNotFoundError({
+              reason: 'channel not found',
+            });
           if (state.finalized)
-            throw new SessionError(
-              'Channel already finalized',
-              'CHANNEL_FINALIZED',
-            );
+            throw new Errors.ChannelClosedError({
+              reason: 'channel already finalized',
+            });
 
           assertUint128(cumulativeAmount);
 
@@ -501,16 +556,14 @@ export function session(params: AbstractSessionServerOptions) {
               ? state.spent
               : state.settledOnChain;
           if (cumulativeAmount < minClose) {
-            throw new SessionError(
-              `Close amount ${cumulativeAmount} < min ${minClose}`,
-              'CLOSE_AMOUNT_TOO_LOW',
-            );
+            throw new Errors.VerificationFailedError({
+              reason: `close voucher amount must be >= ${minClose} (max of spent and on-chain settled)`,
+            });
           }
           if (cumulativeAmount > state.deposit) {
-            throw new SessionError(
-              'Close amount exceeds deposit',
-              'AMOUNT_EXCEEDS_DEPOSIT',
-            );
+            throw new Errors.AmountExceedsDepositError({
+              reason: 'close amount exceeds deposit',
+            });
           }
 
           const voucher: VoucherRecord = {
@@ -525,10 +578,9 @@ export function session(params: AbstractSessionServerOptions) {
             state.authorizedSigner,
           );
           if (!valid)
-            throw new SessionError(
-              'Invalid close voucher signature',
-              'INVALID_SIGNATURE',
-            );
+            throw new Errors.InvalidSignatureError({
+              reason: 'invalid close voucher signature',
+            });
 
           const closeArgs = [channelId, cumulativeAmount, signature] as const;
 
@@ -563,16 +615,20 @@ export function session(params: AbstractSessionServerOptions) {
             hash: txHash,
           });
           if (closeReceipt.status !== 'success') {
-            throw new SessionError(
-              `Close tx reverted: ${txHash}`,
-              'CLOSE_REVERTED',
-            );
+            throw new Errors.VerificationFailedError({
+              reason: `close transaction reverted: ${txHash}`,
+            });
           }
 
-          state.highestVoucherAmount = cumulativeAmount;
-          state.highestVoucher = voucher;
-          state.finalized = true;
-          channels.set(channelId, state);
+          await channelStore.updateChannel(channelId, (current) => {
+            if (!current) return null;
+            return {
+              ...current,
+              highestVoucherAmount: cumulativeAmount,
+              highestVoucher: voucher,
+              finalized: true,
+            };
+          });
 
           return makeSessionReceipt({
             challengeId: challenge.id as string,
@@ -585,19 +641,27 @@ export function session(params: AbstractSessionServerOptions) {
         }
 
         default:
-          throw new SessionError(
-            `Unknown session action: ${action}`,
-            'BAD_REQUEST',
-          );
+          throw new Errors.BadRequestError({
+            reason: `unknown session action: ${action}`,
+          });
       }
     },
 
-    respond({ credential }: { credential: Record<string, unknown> }) {
+    respond({ credential, input }) {
       const action = (credential.payload as Record<string, unknown>)
         .action as string;
+
       if (action === 'close' || action === 'topUp') {
         return new Response(null, { status: 204 });
       }
+
+      if (input.method === 'POST') {
+        const contentLength = input.headers.get('content-length');
+        if (contentLength !== null && contentLength !== '0') return undefined;
+        if (input.headers.has('transfer-encoding')) return undefined;
+        return new Response(null, { status: 204 });
+      }
+
       return undefined;
     },
   });

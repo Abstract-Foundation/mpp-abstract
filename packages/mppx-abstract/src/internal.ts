@@ -1,3 +1,4 @@
+import { Errors } from 'mppx';
 import { bytesToHex } from 'viem';
 import { abstract, abstractTestnet } from 'viem/chains';
 import type { ChainEIP712 } from 'viem/zksync';
@@ -14,9 +15,9 @@ export function resolveChain(chainId: number): ChainEIP712 {
 
 export function assertUint128(amount: bigint): void {
   if (amount < 0n || amount > UINT128_MAX) {
-    throw new Error(
-      `amount ${amount} exceeds uint128 range [0, ${UINT128_MAX}]`,
-    );
+    throw new Errors.VerificationFailedError({
+      reason: `cumulativeAmount exceeds uint128 range`,
+    });
   }
 }
 
