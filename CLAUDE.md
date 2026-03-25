@@ -2,63 +2,91 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What This Is
-
-MPP (Machine Payments Protocol) implementation for Abstract chain. A `mppx` payment method plugin that settles ERC-20 payments on Abstract (ZKsync-based) using two intents:
-
-- **Charge**: One-time ERC-3009 `TransferWithAuthorization` — client signs typed data, server broadcasts tx
-- **Session**: Payment channels via `AbstractStreamChannel` escrow — single on-chain open, off-chain cumulative vouchers, server-initiated close
-
-## Build & Test Commands
+## Commands
 
 ```bash
-# Install (from root)
-pnpm install
+# Root (pnpm workspace + Turbo)
+pnpm build          # Build all packages
+pnpm typecheck      # Type-check all packages
+pnpm test           # Run all tests
 
-# Build everything (turbo-cached, contracts → plugin → examples)
-pnpm turbo run build
+# packages/mppx-abstract
+pnpm build          # tsc compile → dist/
+pnpm dev            # tsc --watch
+pnpm typecheck      # tsc --noEmit
 
-# TypeScript plugin only
-cd packages/mppx-abstract && pnpm build        # tsc
-cd packages/mppx-abstract && pnpm typecheck     # tsc --noEmit
+# packages/contracts (Foundry)
+forge build         # Standard compile
+forge build --zksync  # ZKsync VM compile (requires foundry-zksync)
+forge test -v       # Run 17 contract tests
+forge soldeer install  # Install Solidity deps (solady, forge-std)
 
-# Solidity contracts
-cd packages/contracts && forge build
-cd packages/contracts && forge test -v                    # all 17 tests
-cd packages/contracts && forge test -v --match test_Open  # single test
-
-# Lint (Biome — excludes .sol files)
-biome check .
-biome format .
+# examples
+pnpm dev            # tsx src/index.ts or tsx src/agent.ts
+pnpm typecheck      # tsc --noEmit
 ```
 
-## Monorepo Structure
+Linting/formatting uses **Biome** (`biome.json` at root). Solidity files are excluded from Biome.
 
-pnpm workspaces + Turbo. Shared dependency versions in `pnpm-workspace.yaml` catalog.
+## Architecture
 
-| Package | Purpose |
-|---------|---------|
-| `packages/contracts` | Solidity `AbstractStreamChannel` escrow (Foundry, Soldeer deps) |
-| `packages/mppx-abstract` | TypeScript mppx plugin — exports `./client` and `./server` subpaths |
-| `examples/hono-server` | Example paid API server (Hono + mppx) |
-| `examples/agent-client` | Example autonomous client that handles 402 → sign → retry |
+This is a **Machine Payments Protocol (MPP)** plugin for the Abstract blockchain, enabling paid API access via two settlement mechanisms.
 
-## Key Architecture
+### Package Layout
 
-### Plugin structure (`packages/mppx-abstract/src/`)
+```
+packages/contracts/        Solidity — AbstractStreamChannel.sol
+packages/mppx-abstract/    TypeScript plugin (npm: mppx-abstract)
+examples/hono-server/      Server example using the plugin
+examples/agent-client/     Autonomous client that pays via 402 flow
+```
 
-- `constants.ts` — ABIs, token addresses, EIP-712 types, chain constants
-- `client/charge.ts` — Signs ERC-3009 `TransferWithAuthorization` typed data
-- `client/session.ts` — Manages channel lifecycle: open → voucher → close, tracks channels in-memory Map
-- `server/charge.ts` — Verifies ERC-3009 sig, broadcasts `transferWithAuthorization` (optional ZKsync paymaster)
-- `server/session.ts` — Verifies voucher sigs, calls `settle()`/`close()` on escrow contract
-- `client/methods.ts` & `server/methods.ts` — Zod schemas and `Method.from()` definitions for both intents
+### Payment Flow
 
-### Contract (`packages/contracts/src/AbstractStreamChannel.sol`)
+Both payment intents follow the same HTTP protocol:
+1. Client requests a resource → server responds `402 Payment Required` with `WWW-Authenticate: Payment method="abstract"`
+2. Client signs and retries with `Authorization: Payment <base64url>`
+3. Server verifies, settles on-chain, responds `200 OK` with `Payment-Receipt`
 
-Direct port of Tempo's `TempoStreamChannel` with three changes: `ITIP20` → `IERC20`, Tempo utility check → `require(token != address(0))`, EIP-712 domain name → `"Abstract Stream Channel"`. All function signatures, events, errors, and business logic are otherwise identical.
+The `mppx` framework (peer dep `^0.4.7`) handles this 402 negotiation loop. `mppx-abstract` implements the Abstract-specific signing and settlement logic on top.
 
-Core flow: `open()` → `settle()` (repeatable) → `close()`. Payer escape hatch: `requestClose()` → 15 min grace → `withdraw()`.
+### Two Intents
+
+**`charge` (ERC-3009 `TransferWithAuthorization`)**
+- Client signs typed data only — no transaction from client
+- Server calls `transferWithAuthorization()` on USDC.e, paying gas (or via Abstract paymaster)
+- One signature per request; replay-protected by nonce + `validBefore` expiry
+- Implementation: `packages/mppx-abstract/src/client/charge.ts` + `server/charge.ts`
+
+**`session` (AbstractStreamChannel payment channels)**
+- Client opens a channel on-chain once (approve + `open()`), depositing USDC.e into escrow
+- Each subsequent request exchanges a signed EIP-712 voucher with a cumulative amount
+- Server accumulates the highest accepted voucher; calls `settle()` or `close()` to finalize
+- Payer escape hatch: `requestClose()` → 15-minute grace period → `withdraw()`
+- Implementation: `packages/mppx-abstract/src/client/session.ts` + `server/session.ts`
+
+### Smart Contract
+
+`AbstractStreamChannel.sol` is a direct port of Tempo's `TempoStreamChannel.sol` with three changes:
+1. `ITIP20` → `IERC20`
+2. `TempoUtilities.isTIP20()` → `require(token != address(0))`
+3. EIP-712 domain → `"Abstract Stream Channel"`
+
+All business logic is identical to Tempo's implementation.
+
+### Abstract / ZKsync Specifics
+
+- Abstract uses the ZKsync VM — on-chain deployment requires `foundry-zksync` or `hardhat-zksync`
+- Standard `forge test` works without `foundry-zksync` (tests run against a fork-std EVM)
+- Gas sponsorship uses **native ZKsync paymasters** (`customData.paymasterParams`) — no separate fee-payer service needed
+- Chain IDs: `11124` (testnet), `2741` (mainnet)
+- Token: USDC.e (6 decimals); constants in `packages/mppx-abstract/src/constants.ts`
+
+### TypeScript Module Resolution
+
+`packages/mppx-abstract` exports three entry points: `mppx-abstract`, `mppx-abstract/client`, `mppx-abstract/server` (see `package.json` exports map).
+
+Examples use **path mappings** in `tsconfig.json` to resolve these from local source during development — no need to build the package first when working in examples.
 
 ### EIP-712 Domains
 
