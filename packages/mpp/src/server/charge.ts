@@ -23,7 +23,6 @@ import {
   type Transport,
   type WalletClient,
 } from 'viem';
-import { verifyTypedData } from 'viem/actions';
 import { abstract, abstractTestnet } from 'viem/chains';
 import {
   type ChainEIP712,
@@ -217,7 +216,7 @@ export function charge(params: AbstractChargeServerOptions) {
         chainId,
       );
 
-      const verified = await verifyTypedData(publicClient, {
+      const verified = await publicClient.verifyTypedData({
         address: from,
         domain,
         types: TRANSFER_WITH_AUTHORIZATION_TYPES,
