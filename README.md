@@ -246,7 +246,6 @@ const mppx = Mppx.create({
       account: serverAccount,
       recipient: '0xYourRecipient',
       currency: USDC_E_TESTNET,
-      escrowContract: '0xYourAbstractStreamChannel',
       amount: '0.001',
       suggestedDeposit: '1',
       unitType: 'request',
@@ -270,7 +269,6 @@ app.get('/api/stream',
     currency: USDC_E_TESTNET,
     decimals: 6,
     recipient: '0x...',
-    escrowContract: '0x...',
     unitType: 'request',
     suggestedDeposit: '1',
   }),
@@ -298,7 +296,6 @@ const mppx = Mppx.create({
     abstractSession({
       account,
       deposit: '5', // pre-fund 5 USDC.e
-      escrowContract: '0xYourAbstractStreamChannel',
     }),
   ],
 })
@@ -319,7 +316,7 @@ USDC.e on Abstract Testnet supports minting via the Open Minter contract:
 import { createWalletClient, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { writeContract } from 'viem/actions'
-import { OPEN_MINTER_TESTNET, USDC_E_TESTNET } from 'mppx-abstract'
+const OPEN_MINTER_TESTNET = '0x86C3FA1c8d7dcDebAC1194531d080e6e6fF9afF5'
 
 const account = privateKeyToAccount('0x...')
 const client = createWalletClient({
@@ -378,6 +375,7 @@ tsx src/agent.ts
 | Chain ID | 11124 | 2741 |
 | RPC | `https://api.testnet.abs.xyz` | `https://api.mainnet.abs.xyz` |
 | USDC.e | `0xbd28Bd5A3Ef540d1582828CE2A1a657353008C61` | `0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1` |
+| AbstractStreamChannel | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` |
 | Explorer | https://explorer.testnet.abs.xyz | https://explorer.abs.xyz |
 | VM | ZKsync (native AA, FCFS sequencer) | ZKsync |
 

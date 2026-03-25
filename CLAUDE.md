@@ -105,4 +105,5 @@ Examples use **path mappings** in `tsconfig.json` to resolve these from local so
 | | Testnet (11124) | Mainnet (2741) |
 |---|---|---|
 | USDC.e | `0xbd28Bd5A3Ef540d1582828CE2A1a657353008C61` | `0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1` |
+| AbstractStreamChannel | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` |
 | RPC | `https://api.testnet.abs.xyz` | `https://api.mainnet.abs.xyz` |
