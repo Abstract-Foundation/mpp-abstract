@@ -36,6 +36,7 @@ import {
   TRANSFER_WITH_AUTHORIZATION_TYPES,
   USDC_E_DECIMALS,
 } from '../constants.js';
+import { resolveChain } from '../internal.js';
 
 export interface AbstractChargeServerOptions {
   /** Token address (defaults to USDC.e for the resolved chain). */
@@ -150,17 +151,7 @@ export function charge(params: AbstractChargeServerOptions) {
     publicClient: PublicClient<Transport, ChainEIP712>;
     walletClient: WalletClient<Transport, ChainEIP712, Account>;
   } {
-    const chain: ChainEIP712 | undefined =
-      chainId === abstract.id
-        ? abstract
-        : chainId === abstractTestnet.id
-          ? abstractTestnet
-          : undefined;
-    if (!chain) {
-      throw new Error(
-        `Unsupported chainId ${chainId}, expected ${abstract.id} (Abstract Mainnet) or ${abstractTestnet.id} (Abstract Testnet)`,
-      );
-    }
+    const chain = resolveChain(chainId);
     const transport = http(rpcUrl);
     return {
       publicClient: createPublicClient({ chain, transport }),
@@ -178,16 +169,8 @@ export function charge(params: AbstractChargeServerOptions) {
       recipient,
     } as Record<string, unknown>,
 
-    async request({
-      credential,
-      request,
-    }: {
-      credential?: unknown;
-      request: Record<string, unknown>;
-    }) {
-      const md = (request.methodDetails ?? {}) as Record<string, unknown>;
-      const chainId = (md.chainId as number | undefined) ?? defaultChain.id;
-      return { ...request, chainId };
+    async request({ request }) {
+      return { ...request, chainId: request.chainId ?? defaultChain.id };
     },
 
     async verify({
@@ -317,6 +300,7 @@ export function charge(params: AbstractChargeServerOptions) {
 
       return {
         method: 'abstract' as const,
+        intent: 'charge' as const,
         status: 'success' as const,
         timestamp: new Date().toISOString(),
         reference: txHash,

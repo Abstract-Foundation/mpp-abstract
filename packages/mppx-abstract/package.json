@@ -24,12 +24,14 @@
   },
   "peerDependencies": {
     "mppx": "catalog:",
-    "viem": "catalog:"
+    "viem": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
     "mppx": "catalog:",
     "typescript": "catalog:",
-    "viem": "catalog:"
+    "viem": "catalog:",
+    "zod": "catalog:"
   }
 }

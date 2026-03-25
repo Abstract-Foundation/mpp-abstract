@@ -10,16 +10,50 @@ import { Credential, Method } from 'mppx';
 import {
   type Account,
   type Address,
+  createPublicClient,
   createWalletClient,
+  erc20Abi,
   type Hex,
   http,
+  type PublicClient,
   type Transport,
   type WalletClient,
 } from 'viem';
-import { abstract, abstractTestnet } from 'viem/chains';
 import type { ChainEIP712 } from 'viem/zksync';
-import { TRANSFER_WITH_AUTHORIZATION_TYPES } from '../constants.js';
+import { ERC3009_ABI, TRANSFER_WITH_AUTHORIZATION_TYPES } from '../constants.js';
+import { randomBytes32, resolveChain } from '../internal.js';
 import { abstractChargeMethods } from './methods.js';
+
+async function getErc3009Domain(
+  publicClient: PublicClient,
+  currency: Address,
+  chainId: number,
+) {
+  let name = 'USD Coin';
+  let version = '2';
+
+  try {
+    name = (await publicClient.readContract({
+      address: currency,
+      abi: erc20Abi,
+      functionName: 'name',
+    })) as string;
+  } catch {
+    /* fallback to USDC defaults */
+  }
+
+  try {
+    version = (await publicClient.readContract({
+      address: currency,
+      abi: ERC3009_ABI,
+      functionName: 'version',
+    })) as string;
+  } catch {
+    /* fallback to USDC defaults */
+  }
+
+  return { name, version, chainId, verifyingContract: currency };
+}
 
 export interface AbstractChargeClientOptions {
   /** Viem account to sign ERC-3009 authorizations. */
@@ -45,28 +79,23 @@ export interface AbstractChargeClientOptions {
 export function abstractCharge(options: AbstractChargeClientOptions) {
   const { account, getClient: customGetClient, rpcUrl } = options;
 
-  function buildClient(
-    chainId: number,
-  ): WalletClient<Transport, ChainEIP712, Account> {
-    const chain: ChainEIP712 | undefined =
-      chainId === abstract.id
-        ? abstract
-        : chainId === abstractTestnet.id
-          ? abstractTestnet
-          : undefined;
-
-    if (!chain) {
-      throw new Error(
-        `Unsupported chainId ${chainId} for Abstract charge method`,
-      );
-    }
-
-    return createWalletClient({ account, chain, transport: http(rpcUrl) });
+  function buildClient(chainId: number): {
+    walletClient: WalletClient<Transport, ChainEIP712, Account>;
+    publicClient: PublicClient<Transport, ChainEIP712>;
+  } {
+    const chain = resolveChain(chainId);
+    const transport = http(rpcUrl);
+    return {
+      walletClient: createWalletClient({ account, chain, transport }),
+      publicClient: createPublicClient({ chain, transport }),
+    };
   }
 
-  async function resolveClient(chainId: number): Promise<WalletClient> {
+  async function resolveWalletClient(
+    chainId: number,
+  ): Promise<WalletClient> {
     if (customGetClient) return customGetClient(chainId);
-    return buildClient(chainId);
+    return buildClient(chainId).walletClient;
   }
 
   return Method.toClient(abstractChargeMethods, {
@@ -82,21 +111,16 @@ export function abstractCharge(options: AbstractChargeClientOptions) {
         ((challenge.request as Record<string, unknown>).chainId as
           | number
           | undefined) ??
-        abstract.id;
+        resolveChain(2741).id;
 
-      const client = await resolveClient(chainId);
+      const walletClient = await resolveWalletClient(chainId);
 
       const req = challenge.request as Record<string, unknown>;
       const currency = req.currency as Address;
       const recipient = req.recipient as Address;
       const amountRaw = req.amount as string;
 
-      // Random bytes32 nonce for the ERC-3009 authorization
-      const nonceBytes = new Uint8Array(32);
-      globalThis.crypto.getRandomValues(nonceBytes);
-      const nonce = `0x${Array.from(nonceBytes)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}` as Hex;
+      const nonce = randomBytes32();
 
       const validAfter = 0n;
       const expiresStr = challenge.expires as string | undefined;
@@ -104,14 +128,10 @@ export function abstractCharge(options: AbstractChargeClientOptions) {
         ? BigInt(Math.floor(new Date(expiresStr).getTime() / 1000))
         : BigInt(Math.floor(Date.now() / 1000) + 1800);
 
-      const domain = {
-        name: 'USD Coin',
-        version: '2',
-        chainId,
-        verifyingContract: currency,
-      };
+      const { publicClient } = buildClient(chainId);
+      const domain = await getErc3009Domain(publicClient, currency, chainId);
 
-      const signature = await client.signTypedData({
+      const signature = await walletClient.signTypedData({
         account,
         domain,
         types: TRANSFER_WITH_AUTHORIZATION_TYPES,

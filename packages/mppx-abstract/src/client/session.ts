@@ -21,6 +21,7 @@ import {
   parseUnits,
   type Transport,
   type WalletClient,
+  zeroAddress,
 } from 'viem';
 import {
   readContract,
@@ -28,7 +29,7 @@ import {
   waitForTransactionReceipt,
   writeContract,
 } from 'viem/actions';
-import { abstract, abstractTestnet, type ChainEIP712 } from 'viem/chains';
+import type { ChainEIP712 } from 'viem/chains';
 import { eip712WalletActions } from 'viem/zksync';
 import {
   ABSTRACT_STREAM_CHANNEL_ABI,
@@ -36,6 +37,7 @@ import {
   VOUCHER_DOMAIN_VERSION,
   VOUCHER_TYPES,
 } from '../constants.js';
+import { randomBytes32, resolveChain } from '../internal.js';
 import { abstractSessionMethods } from './methods.js';
 
 const ERC20_ABI = [
@@ -119,17 +121,7 @@ export function abstractSession(options: AbstractSessionClientOptions) {
     chainId: number,
   ): Promise<WalletClient<Transport, ChainEIP712, Account>> {
     if (options.getClient) return options.getClient(chainId);
-    const chain =
-      chainId === abstract.id
-        ? abstract
-        : chainId === abstractTestnet.id
-          ? abstractTestnet
-          : undefined;
-    if (!chain) {
-      throw new Error(
-        `Unsupported chainId ${chainId}: no client available and unable to infer chain from ID`,
-      );
-    }
+    const chain = resolveChain(chainId);
     return createWalletClient<Transport, ChainEIP712, Account>({
       account,
       chain,
@@ -141,17 +133,7 @@ export function abstractSession(options: AbstractSessionClientOptions) {
     chainId: number,
   ): Promise<PublicClient<Transport, ChainEIP712>> {
     if (options.getPublicClient) return options.getPublicClient(chainId);
-    const chain =
-      chainId === abstract.id
-        ? abstract
-        : chainId === abstractTestnet.id
-          ? abstractTestnet
-          : undefined;
-    if (!chain) {
-      throw new Error(
-        `Unsupported chainId ${chainId}: no client available and unable to infer chain from ID`,
-      );
-    }
+    const chain = resolveChain(chainId);
     return createPublicClient<Transport, ChainEIP712>({
       chain,
       transport: http(rpcUrl),
@@ -190,7 +172,7 @@ export function abstractSession(options: AbstractSessionClientOptions) {
       const req = challenge.request as Record<string, unknown>;
       const md = (req.methodDetails ?? {}) as Record<string, unknown>;
 
-      const chainId = (md.chainId as number | undefined) ?? abstract.id;
+      const chainId = (md.chainId as number | undefined) ?? resolveChain(2741).id;
       const currency = req.currency as Address;
       const recipient = req.recipient as Address;
       const amountRaw = req.amount as string;
@@ -213,22 +195,19 @@ export function abstractSession(options: AbstractSessionClientOptions) {
       // ── Open a new channel ────────────────────────────────────────────────
       if (!entry) {
         const suggestedDepositRaw = req.suggestedDeposit as string | undefined;
+        const decimals = (req.decimals as number | undefined) ?? 6;
         const depositStr = options.deposit;
         const deposit = suggestedDepositRaw
           ? BigInt(suggestedDepositRaw)
           : depositStr
-            ? parseUnits(depositStr, 6)
+            ? parseUnits(depositStr, decimals)
             : (() => {
                 throw new Error(
                   'deposit required: set options.deposit or ensure server sends suggestedDeposit',
                 );
               })();
 
-        const nonceBytes = new Uint8Array(32);
-        globalThis.crypto.getRandomValues(nonceBytes);
-        const salt = `0x${Array.from(nonceBytes)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}` as Hex;
+        const salt = randomBytes32();
 
         // Ensure allowance
         const currentAllowance = await readContract(publicClient, {
@@ -261,7 +240,7 @@ export function abstractSession(options: AbstractSessionClientOptions) {
             currency,
             deposit as unknown as bigint,
             salt,
-            '0x0000000000000000000000000000000000000000' as Address,
+            zeroAddress,
           ],
           chain: null,
         });
@@ -277,7 +256,7 @@ export function abstractSession(options: AbstractSessionClientOptions) {
             recipient,
             currency,
             salt,
-            '0x0000000000000000000000000000000000000000' as Address,
+            zeroAddress,
           ],
         })) as Hex;
 

@@ -18,32 +18,32 @@ export const abstractChargeMethods = Method.from({
   intent: 'charge',
   schema: {
     credential: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       payload: z.object({
         type: z.literal('authorization'),
-        signature: z.string(),
-        nonce: z.string(),
-        validAfter: z.string(),
-        validBefore: z.string(),
-        from: z.string(),
-      }) as any,
+        signature: z.signature(),
+        nonce: z.hash(),
+        validAfter: z.amount(),
+        validBefore: z.amount(),
+        from: z.address(),
+      }),
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     request: z.pipe(
       z.object({
-        amount: z.string(),
+        amount: z.amount(),
         currency: z.string(),
         decimals: z.number(),
         recipient: z.string(),
         chainId: z.optional(z.number()),
         description: z.optional(z.string()),
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      z.transform((v: any) => ({
-        ...v,
-        amount: parseUnits(v.amount as string, v.decimals as number).toString(),
+      z.transform(({ amount, decimals, chainId, ...rest }) => ({
+        ...rest,
+        amount: parseUnits(amount, decimals).toString(),
+        ...(chainId !== undefined
+          ? { methodDetails: { chainId } }
+          : {}),
       })),
-    ) as any,
+    ),
   },
 });
 
@@ -57,52 +57,50 @@ export const abstractSessionMethods = Method.from({
   intent: 'session',
   schema: {
     credential: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       payload: z.discriminatedUnion('action', [
         z.object({
           action: z.literal('open'),
-          channelId: z.string(),
-          cumulativeAmount: z.string(),
-          signature: z.string(),
-          txHash: z.string(),
+          channelId: z.hash(),
+          cumulativeAmount: z.amount(),
+          signature: z.signature(),
+          txHash: z.hash(),
           authorizedSigner: z.optional(z.string()),
         }),
         z.object({
           action: z.literal('topUp'),
-          channelId: z.string(),
-          additionalDeposit: z.string(),
-          txHash: z.string(),
+          channelId: z.hash(),
+          additionalDeposit: z.amount(),
+          txHash: z.hash(),
         }),
         z.object({
           action: z.literal('voucher'),
-          channelId: z.string(),
-          cumulativeAmount: z.string(),
-          signature: z.string(),
+          channelId: z.hash(),
+          cumulativeAmount: z.amount(),
+          signature: z.signature(),
         }),
         z.object({
           action: z.literal('close'),
-          channelId: z.string(),
-          cumulativeAmount: z.string(),
-          signature: z.string(),
+          channelId: z.hash(),
+          cumulativeAmount: z.amount(),
+          signature: z.signature(),
         }),
-      ]) as any,
+      ]),
     },
     request: z.pipe(
       z.object({
-        amount: z.string(),
+        amount: z.amount(),
         currency: z.string(),
         decimals: z.number(),
         unitType: z.string(),
         recipient: z.optional(z.string()),
         chainId: z.optional(z.number()),
-        channelId: z.optional(z.string()),
+        channelId: z.optional(z.hash()),
         escrowContract: z.optional(z.string()),
-        suggestedDeposit: z.optional(z.string()),
-        minVoucherDelta: z.optional(z.string()),
+        suggestedDeposit: z.optional(z.amount()),
+        minVoucherDelta: z.optional(z.amount()),
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      z.transform((v: any) => {
-        const {
+      z.transform(
+        ({
           amount,
           decimals,
           suggestedDeposit,
@@ -111,29 +109,22 @@ export const abstractSessionMethods = Method.from({
           escrowContract,
           chainId,
           ...rest
-        } = v;
-        return {
+        }) => ({
           ...rest,
-          amount: parseUnits(amount as string, decimals as number).toString(),
+          amount: parseUnits(amount, decimals).toString(),
           ...(suggestedDeposit !== undefined && {
-            suggestedDeposit: parseUnits(
-              suggestedDeposit as string,
-              decimals as number,
-            ).toString(),
+            suggestedDeposit: parseUnits(suggestedDeposit, decimals).toString(),
           }),
           methodDetails: {
             escrowContract,
             ...(channelId !== undefined && { channelId }),
             ...(minVoucherDelta !== undefined && {
-              minVoucherDelta: parseUnits(
-                minVoucherDelta as string,
-                decimals as number,
-              ).toString(),
+              minVoucherDelta: parseUnits(minVoucherDelta, decimals).toString(),
             }),
             ...(chainId !== undefined && { chainId }),
           },
-        };
-      }),
-    ) as any,
+        }),
+      ),
+    ),
   },
 });
