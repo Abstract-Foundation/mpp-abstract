@@ -18,6 +18,7 @@ import {
   erc20Abi,
   type Hex,
   http,
+  parseSignature,
   type PublicClient,
   type Transport,
   type WalletClient,
@@ -258,13 +259,11 @@ export function charge(params: AbstractChargeServerOptions) {
       let txHash: Hex;
 
       if (isCompactSignature(signature)) {
-        const sigHex = signature.startsWith('0x')
-          ? signature.slice(2)
-          : signature;
-        const r = `0x${sigHex.slice(0, 64)}` as Hex;
-        const s = `0x${sigHex.slice(64, 128)}` as Hex;
-        const v = parseInt(sigHex.slice(128, 130), 16);
-        const txArgs = [...baseArgs, v, r, s] as const;
+        const parsed = parseSignature(signature);
+        if (!('v' in parsed)) {
+          throw new Error('Expected a 65-byte ECDSA signature');
+        }
+        const txArgs = [...baseArgs, Number(parsed.v), parsed.r, parsed.s] as const;
 
         if (paymasterAddress) {
           txHash = await walletClient.writeContract({
