@@ -255,10 +255,12 @@ export function charge(params: AbstractChargeServerOptions) {
         BigInt(validBefore),
         nonce,
       ] as const;
+      const signerCode = await publicClient.getCode({ address: from });
+      const isContractAccount = !!signerCode && signerCode !== '0x';
 
       let txHash: Hex;
 
-      if (isCompactSignature(signature)) {
+      if (!isContractAccount && isCompactSignature(signature)) {
         const parsed = parseSignature(signature);
         if (!('v' in parsed)) {
           throw new Error('Expected a 65-byte ECDSA signature');
