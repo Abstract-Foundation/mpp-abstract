@@ -339,7 +339,7 @@ tsx src/agent.ts
 | Chain ID | 11124 | 2741 |
 | RPC | `https://api.testnet.abs.xyz` | `https://api.mainnet.abs.xyz` |
 | USDC.e | `0xbd28Bd5A3Ef540d1582828CE2A1a657353008C61` | `0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1` |
-| AbstractStreamChannel | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` | `0x331C8Ec3Fefcd2276D9AEA06cD760dE7e5c15fE9` |
+| AbstractStreamChannel | `0x29635C384f451a72ED2e2a312BCeb8b0bDC0923c` | `0x29635C384f451a72ED2e2a312BCeb8b0bDC0923c` |
 | Explorer | https://explorer.testnet.abs.xyz | https://explorer.abs.xyz |
 | VM | ZKsync (native AA, FCFS sequencer) | ZKsync |
 
