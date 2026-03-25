@@ -274,7 +274,6 @@ export function charge(params: AbstractChargeServerOptions) {
             abi: ERC3009_ABI,
             functionName: 'transferWithAuthorization',
             args: txArgs,
-            chain: null,
             ...{
               paymaster: paymasterAddress,
               paymasterInput: getGeneralPaymasterInput({
@@ -289,7 +288,6 @@ export function charge(params: AbstractChargeServerOptions) {
             abi: ERC3009_ABI,
             functionName: 'transferWithAuthorization',
             args: txArgs,
-            chain: null,
           });
         }
       } else if (paymasterAddress) {
@@ -299,7 +297,6 @@ export function charge(params: AbstractChargeServerOptions) {
           abi: ERC3009_BYTES_SIGNATURE_ABI,
           functionName: 'transferWithAuthorization',
           args: [...baseArgs, signature],
-          chain: null,
           ...{
             paymaster: paymasterAddress,
             paymasterInput: getGeneralPaymasterInput({
@@ -314,7 +311,6 @@ export function charge(params: AbstractChargeServerOptions) {
           abi: ERC3009_BYTES_SIGNATURE_ABI,
           functionName: 'transferWithAuthorization',
           args: [...baseArgs, signature],
-          chain: null,
         });
       }
 

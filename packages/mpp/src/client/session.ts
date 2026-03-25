@@ -227,7 +227,6 @@ export function abstractSession(options: AbstractSessionClientOptions) {
             abi: ERC20_ABI,
             functionName: 'approve',
             args: [escrowContract, deposit],
-            chain: null,
           });
           await waitForTransactionReceipt(publicClient, { hash: approveTx });
         }
@@ -245,7 +244,6 @@ export function abstractSession(options: AbstractSessionClientOptions) {
             salt,
             zeroAddress,
           ],
-          chain: null,
         });
         await waitForTransactionReceipt(publicClient, { hash: openTx });
 

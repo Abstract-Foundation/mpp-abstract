@@ -597,7 +597,6 @@ export function session(params: AbstractSessionServerOptions) {
               abi: ABSTRACT_STREAM_CHANNEL_ABI,
               functionName: 'close',
               args: closeArgs,
-              chain: null,
               ...{
                 paymaster: paymasterAddress,
                 paymasterInput: getGeneralPaymasterInput({
@@ -612,7 +611,6 @@ export function session(params: AbstractSessionServerOptions) {
               abi: ABSTRACT_STREAM_CHANNEL_ABI,
               functionName: 'close',
               args: closeArgs,
-              chain: null,
             });
           }
 
