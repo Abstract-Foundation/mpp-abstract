@@ -16,73 +16,47 @@ Implements two payment intents:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        MPP Protocol Flow                                │
-│                                                                         │
-│  Agent / Client                         Server                          │
-│  ─────────────                         ───────                          │
-│                                                                         │
-│  GET /api/resource                                                      │
-│  ──────────────────────────────────►                                    │
-│                                         402 Payment Required            │
-│                                         WWW-Authenticate: Payment       │
-│                                         method="abstract"               │
-│  ◄───────────────────────────────────                                   │
-│                                                                         │
-│  [sign ERC-3009 or voucher]                                             │
-│                                                                         │
-│  GET /api/resource                                                      │
-│  Authorization: Payment <base64url>                                     │
-│  ──────────────────────────────────►                                    │
-│                                         verify signature                │
-│                                         broadcast tx (charge)           │
-│                                         OR accept voucher (session)     │
-│                                                                         │
-│                                         200 OK                          │
-│                                         Payment-Receipt: <base64url>    │
-│  ◄───────────────────────────────────                                   │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    participant C as Agent / Client
+    participant S as Server
 
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       Package Structure                                 │
-│                                                                         │
-│  mpp-abstract/                                                          │
-│  ├── packages/                                                          │
-│  │   ├── contracts/          Solidity — AbstractStreamChannel.sol       │
-│  │   └── mppx-abstract/      TypeScript plugin (client + server)        │
-│  └── examples/                                                          │
-│      ├── hono-server/         Hono server with paid routes              │
-│      └── agent-client/        Autonomous agent that pays on-demand      │
-└─────────────────────────────────────────────────────────────────────────┘
+    C->>S: GET /api/resource
+    S-->>C: 402 Payment Required<br/>WWW-Authenticate: Payment<br/>method="abstract"
+    Note over C: Sign ERC-3009 authorization or session voucher
+    C->>S: GET /api/resource<br/>Authorization: Payment &lt;base64url&gt;
+    Note over S: Verify signature<br/>Broadcast tx (charge)<br/>or accept voucher (session)
+    S-->>C: 200 OK<br/>Payment-Receipt: &lt;base64url&gt;
+```
+
+```mermaid
+flowchart TD
+    root["mpp-abstract/"]
+    root --> packages["packages/"]
+    root --> examples["examples/"]
+    packages --> contracts["contracts/<br/>Solidity: AbstractStreamChannel.sol"]
+    packages --> plugin["mppx-abstract/<br/>TypeScript plugin (client + server)"]
+    examples --> hono["hono-server/<br/>Hono server with paid routes"]
+    examples --> agent["agent-client/<br/>Autonomous agent that pays on-demand"]
 ```
 
 ---
 
 ## How Charge Works (ERC-3009)
 
-```
-Client                         Abstract chain          Server
-  │                                  │                   │
-  │  ← 402 + challenge ──────────────┼───────────────────│
-  │                                  │                   │
-  │  signTypedData(                  │                   │
-  │    TransferWithAuthorization{    │                   │
-  │      from, to, value,            │                   │
-  │      validAfter, validBefore,    │                   │
-  │      nonce                       │                   │
-  │    }                             │                   │
-  │  )                               │                   │
-  │                                  │                   │
-  │  ── Authorization: Payment ──────┼──────────────────►│
-  │                                  │                   │
-  │                                  │  recoverAddress   │
-  │                                  │  verify nonce     │
-  │                                  │                   │
-  │                                  │  ◄── writeContract(transferWithAuthorization)
-  │                                  │      [server pays gas, or paymaster]
-  │                                  │                   │
-  │  ◄── 200 + Payment-Receipt ──────┼───────────────────│
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Abstract chain
+    participant S as Server
+
+    S-->>C: 402 + challenge
+    Note over C: signTypedData(TransferWithAuthorization{<br/>from, to, value,<br/>validAfter, validBefore,<br/>nonce<br/>})
+    C->>S: Authorization: Payment
+    Note over S: recoverAddress<br/>verify nonce
+    S->>A: writeContract(transferWithAuthorization)
+    Note over S,A: Server pays gas directly or via paymaster
+    S-->>C: 200 + Payment-Receipt
 ```
 
 Key properties:
@@ -95,36 +69,25 @@ Key properties:
 
 ## How Session Works (Payment Channels)
 
-```
-Client                    AbstractStreamChannel        Server
-  │                              │                       │
-  │  ── open tx ────────────────►│                       │
-  │     approve + open()         │                       │
-  │     deposit escrowed         │                       │
-  │                              │                       │
-  │  ── Authorization: Payment ──┼──────────────────────►│
-  │     action=open              │                       │
-  │     channelId, txHash        │  verify open tx       │
-  │     voucher sig (cumul=1)    │  verify voucher sig   │
-  │                              │                       │
-  │  ◄── 200 + Receipt ──────────┼───────────────────────│
-  │                              │                       │
-  │  [for each subsequent request]                       │
-  │                              │                       │
-  │  ── Authorization: Payment ──┼──────────────────────►│
-  │     action=voucher           │                       │
-  │     channelId                │  verify EIP-712 sig   │
-  │     cumulativeAmount += Δ    │  accept voucher       │
-  │     new voucher sig          │                       │
-  │                              │                       │
-  │  ◄── 200 + Receipt ──────────┼───────────────────────│
-  │                              │                       │
-  │  [to close]                  │                       │
-  │  ── Authorization: Payment ──┼──────────────────────►│
-  │     action=close             │  verify final voucher │
-  │     final voucher sig        │  close(channelId, ...) ──►│
-  │                              │  refund remainder     │
-  │  ◄── 204 ────────────────────┼───────────────────────│
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CH as AbstractStreamChannel
+    participant S as Server
+
+    C->>CH: open tx<br/>approve + open()<br/>deposit escrowed
+    C->>S: Authorization: Payment<br/>action=open<br/>channelId, txHash<br/>voucher sig (cumul=1)
+    Note over S: verify open tx<br/>verify voucher sig
+    S-->>C: 200 + Receipt
+    loop For each subsequent request
+        C->>S: Authorization: Payment<br/>action=voucher<br/>channelId<br/>cumulativeAmount += delta<br/>new voucher sig
+        Note over S: verify EIP-712 sig<br/>accept voucher
+        S-->>C: 200 + Receipt
+    end
+    C->>S: Authorization: Payment<br/>action=close<br/>final voucher sig
+    S->>CH: close(channelId, ...)
+    Note over S,CH: verify final voucher<br/>refund remainder
+    S-->>C: 204
 ```
 
 Key properties:
