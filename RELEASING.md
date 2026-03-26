@@ -9,8 +9,11 @@ publishing.
 2. Merge changesets into `main`.
 3. The `Release PR` workflow opens or updates a `Version Packages` pull request.
 4. Merge the `Version Packages` pull request.
-5. The `Publish` workflow verifies the merged commit, waits for approval on the
-   protected `npm` environment, and then publishes to npm.
+5. A push to `main` triggers the `Publish` workflow.
+6. The workflow compares `packages/mpp/package.json` to the version currently on
+   npm and only continues when the local version is unpublished.
+7. For unpublished versions, the workflow verifies the merged commit, waits for
+   approval on the protected `npm` environment, and then publishes to npm.
 
 ## GitHub setup
 
