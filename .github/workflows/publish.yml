@@ -1,27 +1,65 @@
 name: Publish
 
 on:
-  pull_request_target:
-    types:
-      - closed
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ github.event.pull_request.number }}
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  detect:
+    name: Detect Publishable Release
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.compare.outputs.should_publish }}
+      local_version: ${{ steps.compare.outputs.local_version }}
+      published_version: ${{ steps.compare.outputs.published_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6.1.0
+        with:
+          node-version: 24
+
+      - name: Compare local and published versions
+        id: compare
+        shell: bash
+        run: |
+          local_version=$(node -p "require('./packages/mpp/package.json').version")
+          published_version=$(npm view @abstract-foundation/mpp version 2>/dev/null || true)
+          published_version=$(printf '%s\n' "$published_version" | tail -n 1 | tr -d '"')
+
+          should_publish=false
+          if [ -z "$published_version" ] || [ "$published_version" != "$local_version" ]; then
+            should_publish=true
+          fi
+
+          echo "local_version=$local_version" >> "$GITHUB_OUTPUT"
+          echo "published_version=$published_version" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$should_publish" >> "$GITHUB_OUTPUT"
+
+      - name: Report decision
+        run: |
+          echo "Local version: ${{ steps.compare.outputs.local_version }}"
+          echo "Published version: ${{ steps.compare.outputs.published_version }}"
+          echo "Should publish: ${{ steps.compare.outputs.should_publish }}"
+
   verify:
     name: Verify Release Commit
-    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && startsWith(github.event.pull_request.head.ref, 'changeset-release/')
+    needs: detect
+    if: needs.detect.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout merged release commit
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
@@ -54,7 +92,10 @@ jobs:
 
   publish:
     name: Publish to npm
-    needs: verify
+    needs:
+      - detect
+      - verify
+    if: needs.detect.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     environment:
       name: npm
@@ -63,10 +104,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Checkout merged release commit
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4.2.0
