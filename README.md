@@ -1,5 +1,9 @@
 # mpp-abstract
 
+> [!IMPORTANT]
+> This repository is archived and no longer the active home for the Abstract MPP plugin or its demo.
+> The packages and demo have moved to [`Abstract-Foundation/abstract-packages`](https://github.com/Abstract-Foundation/abstract-packages). For maintained source and ongoing updates, use that repository.
+
 **Machine Payments Protocol (MPP) implementation for Abstract chain.**
 
 Custom `mppx` payment method plugin that settles on Abstract using standard
@@ -304,11 +308,14 @@ await writeContract(client, {
 
 ## Quickstart
 
+> The commands below are preserved for historical reference. The current source lives in
+> [`Abstract-Foundation/abstract-packages`](https://github.com/Abstract-Foundation/abstract-packages) — clone that repository instead.
+
 ```bash
 # 1. Clone and install
-git clone https://github.com/spectra-the-bot/mpp-abstract
-cd mpp-abstract
-npm install
+git clone https://github.com/Abstract-Foundation/abstract-packages
+cd abstract-packages
+pnpm install
 
 # 2. Build the plugin
 cd packages/mppx-abstract && npx tsc
@@ -364,3 +371,11 @@ tsx src/agent.ts
 3. EIP-712 domain name → `"Abstract Stream Channel"`
 
 All function signatures, events, errors, and business logic are identical.
+
+---
+
+## Contributing
+
+This repository is archived and is not accepting new issues or pull requests.
+
+If you need to contribute to the actively maintained packages or demo, start in [`Abstract-Foundation/abstract-packages`](https://github.com/Abstract-Foundation/abstract-packages).
