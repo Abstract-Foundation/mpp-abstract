@@ -1,5 +1,7 @@
 # @abstract-foundation/mpp
 
+This package README is kept for historical reference. The actively maintained package source now lives in [`Abstract-Foundation/abstract-packages`](https://github.com/Abstract-Foundation/abstract-packages).
+
 [MPP](https://github.com/anthropics/mppx) payment method plugin for the [Abstract](https://abs.xyz) blockchain. Enables paid API access via two settlement mechanisms: one-time ERC-3009 charges and ERC-20 payment channel sessions.
 
 ## Install
@@ -109,3 +111,7 @@ Client-side signing supports both EOA and ERC-1271 smart wallets via `viem`'s ty
 ## License
 
 [MIT](./LICENSE)
+
+---
+
+For maintained source and repository updates, refer to [`Abstract-Foundation/abstract-packages`](https://github.com/Abstract-Foundation/abstract-packages).
